@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>dots.tts · 批量合成服务</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>dots.tts · 批量合成服务</h1>
+        <p>多行文本切块、排队合成、进度轮询与产物下载。</p>
+      </div>
+      <span id="modeBadge" class="badge">loading</span>
+    </header>
+
+    <main class="layout">
+      <section class="panel input-panel">
+        <h2>输入区</h2>
+        <form id="jobForm">
+          <fieldset>
+            <legend>音色选择</legend>
+            <label for="voiceSelect">已存音色</label>
+            <div class="row">
+              <select id="voiceSelect" name="voiceSelect"></select>
+              <button type="button" id="deleteVoiceBtn" class="secondary">删除音色</button>
+            </div>
+            <div id="voicePreview" class="voice-preview hidden">
+              <audio id="voiceAudio" controls></audio>
+              <p id="voicePromptText"></p>
+            </div>
+            <div id="customVoiceFields">
+              <label for="promptAudio">参考音频</label>
+              <input id="promptAudio" name="promptAudio" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,audio/*">
+              <label for="promptText">参考音频转写</label>
+              <textarea id="promptText" name="promptText" rows="3" placeholder="有转写时必须提供参考音频"></textarea>
+              <label class="inline">
+                <input id="saveVoice" name="saveVoice" type="checkbox">
+                保存为音色
+              </label>
+              <div id="saveVoiceFields" class="hidden">
+                <label for="voiceName">音色名称</label>
+                <input id="voiceName" name="voiceName" type="text" placeholder="例如：男22 / voice_1">
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>待合成文本</legend>
+            <textarea id="text" name="text" rows="12" required placeholder="第一段文本\n第二段文本\n第三段文本"></textarea>
+          </fieldset>
+
+          <fieldset class="grid-2">
+            <legend>基本参数</legend>
+            <label>num_steps <input id="numSteps" name="numSteps" type="number" min="1" max="32" step="1"></label>
+            <label>guidance_scale <input id="guidanceScale" name="guidanceScale" type="number" min="1" max="3" step="0.1"></label>
+            <label>seed <input id="seed" name="seed" type="number"></label>
+            <label>language <select id="language" name="language"></select></label>
+            <label>silence_ms <input id="silenceMs" name="silenceMs" type="number" min="0" step="50"></label>
+            <label>chunk_min_chars <input id="chunkMinChars" name="chunkMinChars" type="number" min="1" step="1"></label>
+            <label>chunk_max_chars <input id="chunkMaxChars" name="chunkMaxChars" type="number" min="1" step="1"></label>
+          </fieldset>
+
+          <details>
+            <summary>⚙️ 高级设置</summary>
+            <fieldset class="grid-2">
+              <label>speaker_scale <input id="speakerScale" name="speakerScale" type="number" min="0" max="3" step="0.1"></label>
+              <label>ode_method <select id="odeMethod" name="odeMethod"></select></label>
+              <label>template_name <select id="templateName" name="templateName"></select></label>
+            </fieldset>
+          </details>
+
+          <div class="actions">
+            <button id="submitBtn" type="submit">🚀 提交任务</button>
+            <button id="cancelBtn" type="button" class="secondary hidden">取消</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel output-panel">
+        <h2>输出区</h2>
+        <section class="status-card">
+          <div class="row space-between">
+            <span id="statusBadge" class="status queued">未提交</span>
+            <span id="chunkCounter">0 / 0</span>
+          </div>
+          <progress id="progressBar" value="0" max="100"></progress>
+          <p id="errorMessage" class="error"></p>
+        </section>
+
+        <section id="artifactSection" class="hidden">
+          <h3>生成音频</h3>
+          <audio id="finalAudio" controls></audio>
+          <div id="downloadLinks" class="downloads"></div>
+        </section>
+
+        <section>
+          <h3>任务事件日志</h3>
+          <ul id="eventLog" class="event-log"></ul>
+        </section>
+      </section>
+    </main>
+
+    <section class="panel history-panel">
+      <div class="row space-between">
+        <h2>最近任务</h2>
+        <button id="refreshHistoryBtn" type="button" class="secondary">刷新</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>状态</th><th>文本摘要</th><th>chunks</th><th>创建时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </section>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
