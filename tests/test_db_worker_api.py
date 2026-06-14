@@ -118,12 +118,22 @@ def test_web_assets(test_settings):
     with TestClient(create_app(test_settings)) as client:
         index = client.get("/")
         assert index.status_code == 200
-        for needle in ['id="jobForm"', 'id="voiceSelect"', 'id="language"', 'id="progressBar"', 'id="historyBody"', "/static/app.js"]:
+        for needle in [
+            'id="jobForm"',
+            'id="voiceSelect"',
+            'id="language"',
+            'id="progressBar"',
+            'id="durationText"',
+            'id="historyBody"',
+            "/static/app.js",
+        ]:
             assert needle in index.text
         js = client.get("/static/app.js")
         assert js.status_code == 200
         for endpoint in ["/api/config", "/api/voices", "/api/jobs", "/api/jobs/form", "final.wav", "manifest.json"]:
             assert endpoint in js.text
+        assert "durationText" in js.text
+        assert "formatDuration" in js.text
         css = client.get("/static/styles.css")
         assert css.status_code == 200
         assert "@media" in css.text

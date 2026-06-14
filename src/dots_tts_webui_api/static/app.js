@@ -46,6 +46,37 @@ function updateCancelVisibility(job) {
   $('cancelBtn').classList.toggle('hidden', isTerminalJob(job));
 }
 
+function parseTimestamp(value) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+function formatDuration(ms) {
+  if (ms === null || ms === undefined || ms < 0) return '--';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+function jobDuration(job) {
+  const start = parseTimestamp(job.started_at || job.created_at);
+  if (start === null) return null;
+
+  let end = null;
+  if (job.status === 'cancelled') {
+    end = parseTimestamp(job.cancelled_at || job.updated_at);
+  } else if (isTerminalJob(job)) {
+    end = parseTimestamp(job.completed_at || job.updated_at);
+  } else {
+    end = Date.now();
+  }
+  if (end === null) return null;
+  return end - start;
+}
+
 function fillConfig(config) {
   state.config = config;
   $('modeBadge').textContent = config.mock_tts ? 'mock 模式' : 'real 模式';
@@ -183,6 +214,7 @@ function renderJob(job) {
   $('chunkCounter').textContent = `${job.completed_chunks} / ${job.chunk_count}`;
   const percent = job.chunk_count ? Math.round((job.completed_chunks / job.chunk_count) * 100) : 0;
   $('progressBar').value = percent;
+  $('durationText').textContent = formatDuration(jobDuration(job));
   $('errorMessage').textContent = job.error_message || '';
 
   $('eventLog').replaceChildren(...job.events.map((event) => {
@@ -269,9 +301,11 @@ async function loadHistory() {
         <td>${job.text_preview}</td>
         <td>${job.completed_chunks} / ${job.chunk_count}</td>
         <td>${new Date(job.created_at).toLocaleString()}</td>
-        <td class="table-actions">
-          <button type="button" class="secondary view-job" data-job-id="${job.id}">查看</button>
-          <button type="button" class="danger delete-job" data-job-id="${job.id}">删除</button>
+        <td>
+          <div class="table-actions">
+            <button type="button" class="secondary view-job" data-job-id="${job.id}">查看</button>
+            <button type="button" class="danger delete-job" data-job-id="${job.id}">删除</button>
+          </div>
         </td>
       `;
       tr.querySelector('.view-job').addEventListener('click', async () => {
@@ -316,6 +350,7 @@ async function deleteJob(jobId) {
     $('statusBadge').className = 'status cancelled';
     $('chunkCounter').textContent = '0 / 0';
     $('progressBar').value = 0;
+    $('durationText').textContent = '--';
     $('artifactSection').classList.add('hidden');
     $('eventLog').replaceChildren();
   }
