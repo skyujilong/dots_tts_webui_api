@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+elif [[ -f "$ROOT_DIR/.env.example" ]]; then
+  echo "Note: .env not found; using process environment and code defaults. .env.example is only a template."
+fi
+
 PID_FILE="$ROOT_DIR/.data/server.pid"
 LOG_FILE="$ROOT_DIR/.data/logs/server.log"
 HOST="${DOTS_API_HOST:-127.0.0.1}"
@@ -20,10 +29,6 @@ if [[ -f "$PID_FILE" ]]; then
     exit 0
   fi
   rm -f "$PID_FILE"
-fi
-
-if [[ ! -f "$ROOT_DIR/.env" && -f "$ROOT_DIR/.env.example" ]]; then
-  echo "Note: .env not found; using process environment and code defaults. .env.example is only a template."
 fi
 
 nohup uv run uvicorn "$APP" --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
