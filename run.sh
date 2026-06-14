@@ -45,6 +45,11 @@ if [[ "$MOCK_TTS" != "1" && "$MOCK_TTS" != "true" && "$MOCK_TTS" != "True" ]]; t
   fi
   echo "Installing upstream dots.tts from: $DOTS_TTS_REPO_PATH"
   uv pip install -e "$DOTS_TTS_REPO_PATH"
+  echo "Verifying dots_tts import"
+  uv run python - <<'PY'
+from dots_tts.runtime import DotsTtsRuntime
+print("dots_tts import ok")
+PY
 fi
 
 nohup uv run uvicorn "$APP" --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
