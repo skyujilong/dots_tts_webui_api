@@ -1,8 +1,12 @@
+const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+
 const state = {
   config: null,
   voices: [],
   currentJobId: null,
   pollTimer: null,
+  historyTimer: null,
+  historyLoading: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +36,14 @@ function option(value, label) {
   node.value = value;
   node.textContent = label;
   return node;
+}
+
+function isTerminalJob(job) {
+  return TERMINAL_STATUSES.has(job.status);
+}
+
+function updateCancelVisibility(job) {
+  $('cancelBtn').classList.toggle('hidden', isTerminalJob(job));
 }
 
 function fillConfig(config) {
@@ -197,18 +209,22 @@ function renderJob(job) {
       return a;
     }));
   }
-  if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
-    stopPolling();
-    $('cancelBtn').classList.add('hidden');
-    loadHistory();
-  }
 }
 
 async function pollJob() {
-  if (!state.currentJobId) return;
+  const jobId = state.currentJobId;
+  if (!jobId) return;
   try {
-    renderJob(await api(`/api/jobs/${state.currentJobId}`));
+    const job = await api(`/api/jobs/${jobId}`);
+    if (state.currentJobId !== jobId) return;
+    renderJob(job);
+    updateCancelVisibility(job);
+    if (isTerminalJob(job)) {
+      stopPolling();
+      await loadHistory();
+    }
   } catch (error) {
+    if (state.currentJobId !== jobId) return;
     $('errorMessage').textContent = error.message;
     stopPolling();
   }
@@ -216,13 +232,22 @@ async function pollJob() {
 
 function startPolling() {
   stopPolling();
-  pollJob();
   state.pollTimer = setInterval(pollJob, 1000);
+  pollJob();
 }
 
 function stopPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = null;
+}
+
+function startHistoryPolling() {
+  if (!state.historyTimer) state.historyTimer = setInterval(loadHistory, 1000);
+}
+
+function stopHistoryPolling() {
+  if (state.historyTimer) clearInterval(state.historyTimer);
+  state.historyTimer = null;
 }
 
 async function cancelCurrentJob() {
@@ -232,27 +257,53 @@ async function cancelCurrentJob() {
 }
 
 async function loadHistory() {
-  const jobs = await api('/api/jobs');
-  $('historyBody').replaceChildren(...jobs.map((job) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><code>${job.id.slice(0, 8)}</code></td>
-      <td>${job.status}</td>
-      <td>${job.text_preview}</td>
-      <td>${job.completed_chunks} / ${job.chunk_count}</td>
-      <td>${new Date(job.created_at).toLocaleString()}</td>
-      <td class="table-actions">
-        <button type="button" class="secondary view-job" data-job-id="${job.id}">查看</button>
-        <button type="button" class="danger delete-job" data-job-id="${job.id}">删除</button>
-      </td>
-    `;
-    tr.querySelector('.view-job').addEventListener('click', async () => {
-      state.currentJobId = job.id;
-      renderJob(await api(`/api/jobs/${job.id}`));
-    });
-    tr.querySelector('.delete-job').addEventListener('click', async () => deleteJob(job.id));
-    return tr;
-  }));
+  if (state.historyLoading) return;
+  state.historyLoading = true;
+  try {
+    const jobs = await api('/api/jobs');
+    $('historyBody').replaceChildren(...jobs.map((job) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code>${job.id.slice(0, 8)}</code></td>
+        <td>${job.status}</td>
+        <td>${job.text_preview}</td>
+        <td>${job.completed_chunks} / ${job.chunk_count}</td>
+        <td>${new Date(job.created_at).toLocaleString()}</td>
+        <td class="table-actions">
+          <button type="button" class="secondary view-job" data-job-id="${job.id}">查看</button>
+          <button type="button" class="danger delete-job" data-job-id="${job.id}">删除</button>
+        </td>
+      `;
+      tr.querySelector('.view-job').addEventListener('click', async () => {
+        const selectedJobId = job.id;
+        state.currentJobId = selectedJobId;
+        try {
+          const detail = await api(`/api/jobs/${selectedJobId}`);
+          if (state.currentJobId !== selectedJobId) return;
+          renderJob(detail);
+          updateCancelVisibility(detail);
+          if (isTerminalJob(detail)) {
+            stopPolling();
+            await loadHistory();
+          } else {
+            startPolling();
+          }
+        } catch (error) {
+          if (state.currentJobId !== selectedJobId) return;
+          $('errorMessage').textContent = error.message;
+        }
+      });
+      tr.querySelector('.delete-job').addEventListener('click', async () => deleteJob(job.id));
+      return tr;
+    }));
+    if (jobs.some((job) => !isTerminalJob(job))) {
+      startHistoryPolling();
+    } else {
+      stopHistoryPolling();
+    }
+  } finally {
+    state.historyLoading = false;
+  }
 }
 
 async function deleteJob(jobId) {
