@@ -18,6 +18,8 @@ LOG_FILE="$ROOT_DIR/.data/logs/server.log"
 HOST="${DOTS_API_HOST:-127.0.0.1}"
 PORT="${DOTS_API_PORT:-8080}"
 APP="dots_tts_webui_api.main:app"
+MOCK_TTS="${DOTS_MOCK_TTS:-1}"
+DOTS_TTS_REPO_PATH="${DOTS_TTS_REPO_PATH:-}"
 
 mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
 
@@ -29,6 +31,20 @@ if [[ -f "$PID_FILE" ]]; then
     exit 0
   fi
   rm -f "$PID_FILE"
+fi
+
+if [[ "$MOCK_TTS" != "1" && "$MOCK_TTS" != "true" && "$MOCK_TTS" != "True" ]]; then
+  if [[ -z "$DOTS_TTS_REPO_PATH" ]]; then
+    echo "DOTS_TTS_REPO_PATH is required when DOTS_MOCK_TTS=0" >&2
+    echo "Example: DOTS_TTS_REPO_PATH=/root/dots.tts" >&2
+    exit 1
+  fi
+  if [[ ! -d "$DOTS_TTS_REPO_PATH" ]]; then
+    echo "DOTS_TTS_REPO_PATH does not exist or is not a directory: $DOTS_TTS_REPO_PATH" >&2
+    exit 1
+  fi
+  echo "Installing upstream dots.tts from: $DOTS_TTS_REPO_PATH"
+  uv pip install -e "$DOTS_TTS_REPO_PATH"
 fi
 
 nohup uv run uvicorn "$APP" --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
