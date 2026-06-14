@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+export UV_PROJECT_ENVIRONMENT="$ROOT_DIR/.venv"
+
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -53,11 +55,18 @@ if [[ "$MOCK_TTS" != "1" && "$MOCK_TTS" != "true" && "$MOCK_TTS" != "True" ]]; t
   fi
   echo "Installing upstream dots.tts from: $DOTS_TTS_REPO_PATH"
   uv pip install --python "$PYTHON" -e "$DOTS_TTS_REPO_PATH"
+  if [[ -d "$DOTS_TTS_REPO_PATH/src" ]]; then
+    export PYTHONPATH="$DOTS_TTS_REPO_PATH/src${PYTHONPATH:+:$PYTHONPATH}"
+  else
+    export PYTHONPATH="$DOTS_TTS_REPO_PATH${PYTHONPATH:+:$PYTHONPATH}"
+  fi
+  echo "Python: $($PYTHON -c 'import sys; print(sys.executable)')"
+  echo "PYTHONPATH: $PYTHONPATH"
   echo "Verifying dots_tts import"
   "$PYTHON" - <<'PY'
 import dots_tts
 from dots_tts.runtime import DotsTtsRuntime
-print("dots_tts import ok")
+print("dots_tts import ok", dots_tts.__file__)
 PY
 fi
 
