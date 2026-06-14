@@ -23,6 +23,14 @@ DOTS_TTS_REPO_PATH="${DOTS_TTS_REPO_PATH:-}"
 
 mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
 
+if [[ ! -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  echo "Project virtualenv not found; running uv sync"
+  uv sync
+fi
+
+PYTHON="$ROOT_DIR/.venv/bin/python"
+UVICORN="$ROOT_DIR/.venv/bin/uvicorn"
+
 if [[ -f "$PID_FILE" ]]; then
   OLD_PID="$(cat "$PID_FILE")"
   if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -44,15 +52,21 @@ if [[ "$MOCK_TTS" != "1" && "$MOCK_TTS" != "true" && "$MOCK_TTS" != "True" ]]; t
     exit 1
   fi
   echo "Installing upstream dots.tts from: $DOTS_TTS_REPO_PATH"
-  uv pip install -e "$DOTS_TTS_REPO_PATH"
+  uv pip install --python "$PYTHON" -e "$DOTS_TTS_REPO_PATH"
   echo "Verifying dots_tts import"
-  uv run python - <<'PY'
+  "$PYTHON" - <<'PY'
+import dots_tts
 from dots_tts.runtime import DotsTtsRuntime
 print("dots_tts import ok")
 PY
 fi
 
-nohup uv run uvicorn "$APP" --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
+if [[ ! -x "$UVICORN" ]]; then
+  echo "uvicorn not found in project virtualenv; running uv sync"
+  uv sync
+fi
+
+nohup "$UVICORN" "$APP" --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
 PID="$!"
 echo "$PID" > "$PID_FILE"
 
