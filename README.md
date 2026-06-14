@@ -37,14 +37,15 @@ curl -O http://127.0.0.1:8080/api/jobs/<job_id>/artifacts/manifest.json
 
 ## Real mode
 
-Install the optional dependency only when a local model path is ready:
+Install the wrapper dependencies first, then install upstream `dots.tts` from the local server path. The project intentionally does not hardcode a `dots.tts` path in `pyproject.toml`, because that path is machine-specific.
 
 ```bash
-uv sync --extra real
-DOTS_MOCK_TTS=0 DOTS_ALLOW_MODEL_DOWNLOAD=0 DOTS_MODEL_NAME_OR_PATH=/path/to/local/model \
+uv sync
+uv pip install -e /root/dots.tts
+DOTS_MOCK_TTS=0 DOTS_ALLOW_MODEL_DOWNLOAD=0 DOTS_MODEL_NAME_OR_PATH=/root/dots.tts/models/rednote-hilab/dots.tts-mf \
   uv run uvicorn dots_tts_webui_api.main:app --host 127.0.0.1 --port 8080
 ```
 
-`DOTS_ALLOW_MODEL_DOWNLOAD=0` rejects a missing local model path before importing upstream runtime, so accidental model downloads are blocked by default.
+`DOTS_ALLOW_MODEL_DOWNLOAD=0` rejects a missing local model path before importing upstream runtime, so accidental model downloads are blocked by default. `DOTS_MODEL_NAME_OR_PATH` should point to the directory that directly contains files such as `config.json`, `model.safetensors`, `vocoder.safetensors`, and `speaker_encoder.safetensors`.
 
 See `docs/PLAN.md` and `docs/ARCHITECTURE_CONSTRAINTS.md` for design details.

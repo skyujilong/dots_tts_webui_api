@@ -19,9 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-real = [
-    "dots.tts @ file:///Users/nbe01/workspace/dots.tts",
-]
+real = []
 test = [
     "httpx>=0.27,<1",
     "pytest>=8.2,<9",
