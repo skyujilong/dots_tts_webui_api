@@ -25,5 +25,45 @@ def test_max_chars_soft_split_fallback():
     assert all(len(chunk.text) <= 12 for chunk in chunks)
 
 
+def test_backs_off_to_first_english_period_when_newline_exceeds_max():
+    text = "a" * 12 + "." + "b" * 20 + "\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "a" * 12 + "."
+    assert chunks[0].char_start == 0
+    assert chunks[0].char_end == 13
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
+def test_backs_off_to_first_chinese_period_when_newline_exceeds_max():
+    text = "你" * 12 + "。" + "我" * 20 + "\n尾"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "你" * 12 + "。"
+    assert chunks[0].char_start == 0
+    assert chunks[0].char_end == 13
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
+def test_backs_off_to_first_period_after_min_not_last_before_max():
+    text = "a" * 12 + "." + "b" * 3 + "." + "c" * 20 + "\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=25)
+    assert chunks[0].text == "a" * 12 + "."
+    assert all(len(chunk.text) <= 25 for chunk in chunks)
+
+
+def test_preserves_max_cap_when_no_period_before_max():
+    text = "a" * 25 + "\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "a" * 20
+    assert chunks[1].text == "a" * 5
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
+def test_does_not_backoff_to_period_beyond_max():
+    text = "a" * 25 + ".\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "a" * 20
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
 def test_blank_input_produces_no_chunks():
     assert chunk_text_by_newline("\n  \n", min_chars=1, max_chars=10) == []

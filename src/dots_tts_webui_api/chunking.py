@@ -20,6 +20,19 @@ def preprocess_text(text: str) -> str:
     return "\n".join(line for line in normalized.split("\n") if line.strip())
 
 
+def _find_first_period_split(text: str, start: int, min_chars: int, max_chars: int, stop: int) -> int | None:
+    search_start = start + min_chars
+    search_stop = min(stop, start + max_chars)
+    candidates = [
+        index
+        for index in (text.find(".", search_start, search_stop), text.find("。", search_start, search_stop))
+        if index != -1
+    ]
+    if not candidates:
+        return None
+    return min(candidates) + 1
+
+
 def _split_oversized(text: str, start: int, max_chars: int) -> list[tuple[str, int, int]]:
     pieces: list[tuple[str, int, int]] = []
     cursor = 0
@@ -59,24 +72,27 @@ def chunk_text_by_newline(text: str, min_chars: int, max_chars: int) -> list[Tex
         return []
 
     chunks: list[tuple[str, int, int]] = []
-    current_parts: list[str] = []
-    current_start = 0
-    cursor = 0
-    lines = preprocessed.split("\n")
-    for line_index, line in enumerate(lines):
-        line_start = cursor
-        line_end = line_start + len(line)
-        if not current_parts:
-            current_start = line_start
-        current_parts.append(line)
-        current_text = "\n".join(current_parts)
-        cursor = line_end + (1 if line_index != len(lines) - 1 else 0)
-        if len(current_text) >= min_chars:
-            chunks.append((current_text, current_start, line_end))
-            current_parts = []
-    if current_parts:
-        current_text = "\n".join(current_parts)
-        chunks.append((current_text, current_start, len(preprocessed)))
+    start = 0
+    length = len(preprocessed)
+    while start < length:
+        while start < length and preprocessed[start] == "\n":
+            start += 1
+        if start >= length:
+            break
+
+        newline_index = preprocessed.find("\n", start + min_chars)
+        if newline_index == -1:
+            end = length
+        elif newline_index - start <= max_chars:
+            end = newline_index
+        else:
+            period_end = _find_first_period_split(preprocessed, start, min_chars, max_chars, newline_index)
+            end = period_end if period_end is not None else newline_index
+
+        chunk_text = preprocessed[start:end]
+        if chunk_text.strip():
+            chunks.append((chunk_text, start, end))
+        start = end
 
     final: list[TextChunk] = []
     for chunk_text, start, end in chunks:
