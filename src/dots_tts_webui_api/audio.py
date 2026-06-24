@@ -25,6 +25,7 @@ class FinalArtifacts:
     final_text_path: Path
     final_tts_path: Path
     manifest_path: Path
+    timeline_path: Path
     sample_rate: int
     duration_seconds: float
 
@@ -69,10 +70,30 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
     silence_shape = (silence_samples,) if arrays[0].ndim == 1 else (silence_samples, arrays[0].shape[1])
     silence = np.zeros(silence_shape, dtype=np.float32)
     joined: list[np.ndarray] = []
+    # 按样本精确累加每段在成品音频中的起止位置（含 chunk 间静音），
+    # 由样本数除以采样率换算为毫秒整数，保证与 final.wav 波形严格对齐。
+    timeline_entries: list[dict[str, Any]] = []
+    cursor_samples = 0
     for index, array in enumerate(arrays):
+        chunk = ordered[index]
+        start_samples = cursor_samples
+        end_samples = start_samples + array.shape[0]
+        start_ms = round(start_samples * 1000 / sample_rate)
+        end_ms = round(end_samples * 1000 / sample_rate)
+        timeline_entries.append(
+            {
+                "chunk_index": chunk.chunk_index,
+                "text": chunk.text,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": end_ms - start_ms,
+            }
+        )
         joined.append(array)
+        cursor_samples = end_samples
         if index != len(arrays) - 1 and silence_samples > 0:
             joined.append(silence)
+            cursor_samples += silence_samples
     final_audio = np.concatenate(joined, axis=0)
 
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -80,6 +101,7 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
     final_text_path = job_dir / "final.txt"
     final_tts_path = job_dir / "final.tts"
     manifest_path = job_dir / "manifest.json"
+    timeline_path = job_dir / "timeline.json"
 
     sf.write(final_wav_path, final_audio, sample_rate)
     final_text_path.write_text("\n\n".join(chunk.text for chunk in ordered), encoding="utf-8")
@@ -113,17 +135,29 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
             "final_text_path": str(final_text_path),
             "final_tts_path": str(final_tts_path),
             "manifest_path": str(manifest_path),
+            "timeline_path": str(timeline_path),
         },
         "chunks": chunk_entries,
     }
+    timeline_payload = {
+        "format": "dots_tts_webui_api.timeline.v1",
+        "job_id": job_id,
+        "silence_ms": silence_ms,
+        "sample_rate": sample_rate,
+        "chunk_count": len(ordered),
+        "duration_ms": round(len(final_audio) * 1000 / sample_rate),
+        "chunks": timeline_entries,
+    }
     final_tts_path.write_text(json.dumps(tts_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    timeline_path.write_text(json.dumps(timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return FinalArtifacts(
         final_wav_path=final_wav_path,
         final_text_path=final_text_path,
         final_tts_path=final_tts_path,
         manifest_path=manifest_path,
+        timeline_path=timeline_path,
         sample_rate=sample_rate,
         duration_seconds=len(final_audio) / sample_rate,
     )

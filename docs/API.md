@@ -288,6 +288,7 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 | `final_wav_url` | `string \| null` | 最终音频地址（产物就绪后非空） |
 | `final_text_url` | `string \| null` | 最终文本地址 |
 | `final_tts_url` | `string \| null` | 最终 `.tts` 文件地址 |
+| `final_timeline_url` | `string \| null` | 时间轴文件 `timeline.json` 地址（产物就绪且文件存在时非空） |
 | `manifest_url` | `string \| null` | 清单文件地址 |
 | `chunks` | `ChunkStatusResponse[]` | 各 chunk 状态明细 |
 | `events` | `JobEventResponse[]` | 事件日志 |
@@ -326,7 +327,36 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 
 下载任务产物文件，返回 `FileResponse`。
 
-**`artifact_name` 仅允许以下取值**：`final.wav`、`final.txt`、`final.tts`、`manifest.json`。
+**`artifact_name` 仅允许以下取值**：`final.wav`、`final.txt`、`final.tts`、`timeline.json`、`manifest.json`。
+
+**`timeline.json`（时间轴清单，`dots_tts_webui_api.timeline.v1`）**
+
+按样本精确累加（含 chunk 间静音）得到的每段在成品音频中的起止位置，单位为毫秒整数，与 `final.wav` 波形严格对齐，可直接用作字幕 / 对轴参考。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `format` | `string` | 固定为 `dots_tts_webui_api.timeline.v1` |
+| `job_id` | `string` | 任务 ID |
+| `silence_ms` | `int` | chunk 间静音时长（毫秒） |
+| `sample_rate` | `int` | 采样率 |
+| `chunk_count` | `int` | chunk 总数 |
+| `duration_ms` | `int` | 成品音频总时长（毫秒） |
+| `chunks` | `object[]` | 每段：`chunk_index`、`text`、`start_ms`、`end_ms`、`duration_ms` |
+
+```json
+{
+  "format": "dots_tts_webui_api.timeline.v1",
+  "job_id": "bf8e86aa…",
+  "silence_ms": 500,
+  "sample_rate": 16000,
+  "chunk_count": 2,
+  "duration_ms": 2000,
+  "chunks": [
+    { "chunk_index": 0, "text": "第一段", "start_ms": 0, "end_ms": 1000, "duration_ms": 1000 },
+    { "chunk_index": 1, "text": "第二段", "start_ms": 1500, "end_ms": 2000, "duration_ms": 500 }
+  ]
+}
+```
 
 **错误**：`404`（文件名不在白名单内 / 文件不存在）。
 

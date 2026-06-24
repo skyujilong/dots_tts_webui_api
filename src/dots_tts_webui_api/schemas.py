@@ -194,6 +194,7 @@ class JobStatusResponse(BaseModel):
     final_wav_url: str | None = None
     final_text_url: str | None = None
     final_tts_url: str | None = None
+    final_timeline_url: str | None = None
     manifest_url: str | None = None
     chunks: list[ChunkStatusResponse] = Field(default_factory=list)
     events: list[JobEventResponse] = Field(default_factory=list)
