@@ -14,23 +14,34 @@ class TextChunk:
 
 SPLIT_PATTERN = re.compile(r"[。！？.!?\n]")
 
+# 主循环回退时认可的句末标点（中英文句号、感叹号、问号）。
+# 与 SPLIT_PATTERN 保持一致但不含 \n——主循环本就先按 \n 找切点，
+# 走到回退分支时说明段内无可用换行，只需在这些句末标点处回退即可。
+SENTENCE_END_CHARS = "。！？.!?"
+
 
 def preprocess_text(text: str) -> str:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     return "\n".join(line for line in normalized.split("\n") if line.strip())
 
 
-def _find_first_period_split(text: str, start: int, min_chars: int, max_chars: int, stop: int) -> int | None:
+def _find_first_sentence_end_split(text: str, start: int, min_chars: int, max_chars: int, stop: int) -> int | None:
+    """在 [start+min_chars, min(stop, start+max_chars)] 窗口内找第一个句末标点，
+    返回其后一位作为切点（含标点归前句）；窗口内无句末标点时返回 None。
+
+    认可全部常规句末标点（。！？.!?），保证长句回退时不会因只认句号而漏切，
+    避免把以感叹号/问号收尾的句子被迫推到 max_chars 处硬截断。
+    """
     search_start = start + min_chars
     search_stop = min(stop, start + max_chars)
-    candidates = [
-        index
-        for index in (text.find(".", search_start, search_stop), text.find("。", search_start, search_stop))
-        if index != -1
-    ]
-    if not candidates:
+    earliest = -1
+    for char in SENTENCE_END_CHARS:
+        index = text.find(char, search_start, search_stop)
+        if index != -1 and (earliest == -1 or index < earliest):
+            earliest = index
+    if earliest == -1:
         return None
-    return min(candidates) + 1
+    return earliest + 1
 
 
 def _split_oversized(text: str, start: int, max_chars: int) -> list[tuple[str, int, int]]:
@@ -86,7 +97,7 @@ def chunk_text_by_newline(text: str, min_chars: int, max_chars: int) -> list[Tex
         elif newline_index - start <= max_chars:
             end = newline_index
         else:
-            period_end = _find_first_period_split(preprocessed, start, min_chars, max_chars, newline_index)
+            period_end = _find_first_sentence_end_split(preprocessed, start, min_chars, max_chars, newline_index)
             end = period_end if period_end is not None else newline_index
 
         chunk_text = preprocessed[start:end]

@@ -43,6 +43,32 @@ def test_backs_off_to_first_chinese_period_when_newline_exceeds_max():
     assert all(len(chunk.text) <= 20 for chunk in chunks)
 
 
+def test_backs_off_to_exclamation_when_newline_exceeds_max():
+    # 长句以中文感叹号收尾：回退应认 ！，不被迫推到 max 处硬截断
+    text = "你" * 12 + "！" + "我" * 20 + "\n尾"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "你" * 12 + "！"
+    assert chunks[0].char_end == 13
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
+def test_backs_off_to_question_mark_when_newline_exceeds_max():
+    # 英文问号同样作为回退切点
+    text = "a" * 12 + "?" + "b" * 20 + "\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=20)
+    assert chunks[0].text == "a" * 12 + "?"
+    assert chunks[0].char_end == 13
+    assert all(len(chunk.text) <= 20 for chunk in chunks)
+
+
+def test_backs_off_to_earliest_sentence_end_regardless_of_type():
+    # 窗口内 ！ 比 。 更靠前时，应在更早的 ！ 处回退（取最早句末标点）
+    text = "a" * 12 + "！" + "b" * 3 + "。" + "c" * 20 + "\ntail"
+    chunks = chunk_text_by_newline(text, min_chars=10, max_chars=25)
+    assert chunks[0].text == "a" * 12 + "！"
+    assert all(len(chunk.text) <= 25 for chunk in chunks)
+
+
 def test_backs_off_to_first_period_after_min_not_last_before_max():
     text = "a" * 12 + "." + "b" * 3 + "." + "c" * 20 + "\ntail"
     chunks = chunk_text_by_newline(text, min_chars=10, max_chars=25)
