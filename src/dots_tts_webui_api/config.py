@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # 对齐声学模型运行设备；真机有 GPU 可设 "cuda" 提速。
     alignment_device: str = "cpu"
 
+    # 响度归一化（ffmpeg loudnorm，目标 -16 LUFS）开关。None 表示"未显式设置"，
+    # 由 model_validator 按模式推导：real 默认开、mock 默认关（mock/开发环境一般无 ffmpeg）。
+    # 显式设置 DOTS_ENABLE_LOUDNORM 时以用户值为准。
+    enable_loudnorm: bool | None = None
+
     chunk_min_chars: int = 180
     chunk_max_chars: int = 1200
     default_silence_ms: int = 500
@@ -78,6 +83,8 @@ class Settings(BaseSettings):
         # 未显式设置时按模式推导：real 默认开、mock 默认关。
         if self.enable_sentence_alignment is None:
             object.__setattr__(self, "enable_sentence_alignment", not self.mock_tts)
+        if self.enable_loudnorm is None:
+            object.__setattr__(self, "enable_loudnorm", not self.mock_tts)
         return self
 
     def ensure_directories(self) -> None:

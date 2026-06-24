@@ -29,7 +29,24 @@ echo ">>> 重建 .venv (Python 3.11.9)"
 rm -rf .venv
 uv venv --python 3.11.9 .venv
 
-# 6. 并行执行 uv sync
+# 6. 安装 ffmpeg（响度归一化 DOTS_ENABLE_LOUDNORM 依赖它的 loudnorm filter）
+#    real 模式默认开启响度归一化，缺 ffmpeg 会降级并记 warning；这里直接装好。
+echo ">>> 检查 / 安装 ffmpeg"
+if command -v ffmpeg >/dev/null 2>&1; then
+    echo "ffmpeg 已存在：$(ffmpeg -version | head -1)"
+else
+    echo ">>> 未检测到 ffmpeg，使用 apt 安装"
+    apt-get update
+    apt-get install -y ffmpeg
+fi
+# 校验 loudnorm filter 可用（响度归一化强依赖），不可用则明确报错而非静默继续
+if ! ffmpeg -hide_banner -filters 2>/dev/null | grep -q loudnorm; then
+    echo "!!! ffmpeg 缺少 loudnorm filter，响度归一化将无法工作" >&2
+    exit 1
+fi
+echo "ffmpeg loudnorm filter 可用"
+
+# 7. 并行执行 uv sync
 echo ">>> 开始 uv sync"
 uv sync --parallel 8
 

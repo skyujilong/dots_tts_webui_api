@@ -35,6 +35,8 @@ class FinalArtifacts:
     sentences_path: Path | None = None
     # 对齐失败原因（供 worker 写 warning event）；成功或未开启时为 None。
     alignment_error: str | None = None
+    # 响度归一化失败/降级原因（供 worker 写 warning event）；成功或未开启时为 None。
+    loudnorm_error: str | None = None
 
 
 def write_chunk_text_artifacts(*, chunk_dir: Path, chunk_index: int, text: str, metrics: dict[str, Any]) -> tuple[Path, Path]:
@@ -66,14 +68,27 @@ def merge_artifacts(
     silence_ms: int,
     enable_sentence_alignment: bool = False,
     alignment_device: str = "cpu",
+    enable_loudnorm: bool = False,
 ) -> FinalArtifacts:
     if not chunks:
         raise ValueError("cannot merge an empty chunk list")
     ordered = sorted(chunks, key=lambda chunk: chunk.chunk_index)
+
+    # 响度归一化第一道（拉平段间音量）：在读样本拼接之前，对每个 chunk wav
+    # 单独做 loudnorm 写到 chunks/normalized/，后续读归一化后的版本来拼接。
+    # 失败/无 ffmpeg 时降级——回退用原始 wav，并记录原因（不静默）。
+    loudnorm_error: str | None = None
+    read_paths = [chunk.wav_path for chunk in ordered]
+    if enable_loudnorm:
+        try:
+            read_paths = _normalize_chunks(job_dir=job_dir, ordered=ordered)
+        except Exception as exc:  # noqa: BLE001 - 归一化失败需降级但保留原因
+            loudnorm_error = f"per-chunk loudnorm skipped: {exc.__class__.__name__}: {exc}"
+
     arrays: list[np.ndarray] = []
     sample_rate: int | None = None
-    for chunk in ordered:
-        data, current_sample_rate = sf.read(chunk.wav_path, dtype="float32", always_2d=False)
+    for wav_path in read_paths:
+        data, current_sample_rate = sf.read(wav_path, dtype="float32", always_2d=False)
         if sample_rate is None:
             sample_rate = int(current_sample_rate)
         elif sample_rate != int(current_sample_rate):
@@ -123,6 +138,16 @@ def merge_artifacts(
 
     sf.write(final_wav_path, final_audio, sample_rate)
     final_text_path.write_text("\n\n".join(chunk.text for chunk in ordered), encoding="utf-8")
+
+    # 响度归一化第二道（整条精确落到目标 LUFS）：对已写出的 final.wav 再做一次
+    # 线性 loudnorm。linear=true + 固定采样率只乘增益、不改样本数；归一化后用
+    # 长度守卫校验，样本数若变化则视为破坏时间轴，回退保留原始 final.wav 并记录。
+    if enable_loudnorm:
+        try:
+            _normalize_final(final_wav_path, sample_rate=sample_rate, expected_samples=len(final_audio))
+        except Exception as exc:  # noqa: BLE001 - 归一化失败需降级但保留原因
+            detail = f"final loudnorm skipped: {exc.__class__.__name__}: {exc}"
+            loudnorm_error = f"{loudnorm_error}; {detail}" if loudnorm_error else detail
 
     chunk_entries = [
         {
@@ -200,6 +225,7 @@ def merge_artifacts(
         duration_seconds=len(final_audio) / sample_rate,
         sentences_path=sentences_path,
         alignment_error=alignment_error,
+        loudnorm_error=loudnorm_error,
     )
 
 
@@ -266,3 +292,56 @@ def _write_sentences(
         json.dumps(sentences_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return sentences_path
+
+
+def _normalize_chunks(*, job_dir: Path, ordered: list[ChunkArtifact]) -> list[Path]:
+    """对每个 chunk wav 单独做响度归一化，返回归一化后用于拼接的路径列表。
+
+    无 ffmpeg 直接抛错由调用方降级；任一段失败也抛错（整体回退原始 wav），
+    不做"部分归一化部分不归一化"的半成品，避免段间响度反而更不一致。
+    归一化后强校验采样率与样本数不变，否则视为破坏时间轴而报错。
+    """
+    from .loudness import ffmpeg_available, normalize_file
+
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpeg not found on PATH")
+
+    normalized_dir = job_dir / "chunks" / "normalized"
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+    out_paths: list[Path] = []
+    for chunk in ordered:
+        src_info = sf.info(chunk.wav_path)
+        dst = normalized_dir / f"{chunk.chunk_index:04d}.wav"
+        normalize_file(chunk.wav_path, dst, sample_rate=int(src_info.samplerate))
+        dst_info = sf.info(dst)
+        # 守卫：线性归一化不应改变采样率或样本数，变了说明时间轴会漂移
+        if int(dst_info.samplerate) != int(src_info.samplerate) or dst_info.frames != src_info.frames:
+            raise RuntimeError(
+                f"chunk {chunk.chunk_index} loudnorm changed length "
+                f"({src_info.frames}@{src_info.samplerate} -> {dst_info.frames}@{dst_info.samplerate})"
+            )
+        out_paths.append(dst)
+    return out_paths
+
+
+def _normalize_final(final_wav_path: Path, *, sample_rate: int, expected_samples: int) -> None:
+    """对整条 final.wav 原地做响度归一化（写临时文件后替换）。
+
+    linear=true + 固定采样率只乘增益、不改样本数；归一化后校验样本数与
+    expected_samples 一致才替换原文件，否则报错并保留原始 final.wav，
+    确保 timeline.json / sentences.json 的毫秒时间轴始终对得上波形。
+    """
+    from .loudness import ffmpeg_available, normalize_file
+
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpeg not found on PATH")
+
+    tmp_path = final_wav_path.with_suffix(".loudnorm.wav")
+    normalize_file(final_wav_path, tmp_path, sample_rate=sample_rate)
+    info = sf.info(tmp_path)
+    if int(info.samplerate) != sample_rate or info.frames != expected_samples:
+        tmp_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"final loudnorm changed length ({expected_samples}@{sample_rate} -> {info.frames}@{info.samplerate})"
+        )
+    tmp_path.replace(final_wav_path)

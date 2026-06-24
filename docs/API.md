@@ -403,6 +403,25 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 
 ---
 
+## 响度归一化（Loudness Normalization）
+
+合并多个 chunk 时，可选地对音频做 **LUFS 感知响度归一化**，把段间忽大忽小的音量拉平到统一标准。
+
+> TTS 逐段合成时各段响度天然有差异。归一化采用 **ffmpeg `loudnorm`（EBU R128 / ITU-R BS.1770）双次扫描**，目标 **-16 LUFS**（旁白/广播标准）、真峰上限 **-1.5 dBTP**（防削顶爆音）。
+
+归一化分两道，**都做**：
+
+1. **每个 chunk 单独归一化**（拼接前）——直接解决"段与段音量不一致"，段内自然抑扬保留。
+2. **整条成品再归一化一次**（写出 `final.wav` 后）——整体精确落到 -16 LUFS。
+
+均使用 `linear=true` + 固定采样率：只施加线性增益，**不重采样、不改变样本数**，因此 `timeline.json` / `sentences.json` 的毫秒时间轴不会漂移；归一化后还有**长度守卫**，样本数若变化即报错回退，绝不让时间轴静默偏移。
+
+- 由 `DOTS_ENABLE_LOUDNORM` 控制，**real 模式默认开启、mock 模式默认关闭**（mock/开发环境通常无 ffmpeg）。
+- **依赖系统 `ffmpeg`**（须在 PATH 上，且支持 `loudnorm` filter）。
+- 归一化是增强项：若 ffmpeg 缺失或归一化失败，**主产物 `final.wav` 仍生成（为未归一化的可用音频）、任务仍为 `succeeded`**，但会在任务事件中记录一条 `warning`（`message="loudness normalization skipped"`，`data.error` 含具体原因）。这样"以为归一化了其实没有"的情况一定可见，不会被静默掩盖。
+
+---
+
 ## 数据模型
 
 ### `JobStatus`（任务状态）

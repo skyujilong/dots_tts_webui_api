@@ -222,6 +222,7 @@ class SynthesisWorker:
                 silence_ms=params.silence_ms,
                 enable_sentence_alignment=self.settings.enable_sentence_alignment,
                 alignment_device=self.settings.alignment_device,
+                enable_loudnorm=self.settings.enable_loudnorm,
             )
             db.mark_job_status(
                 conn,
@@ -241,6 +242,17 @@ class SynthesisWorker:
                     level="warning",
                     message="sentence alignment skipped",
                     data={"error": final.alignment_error},
+                )
+            # 响度归一化失败/降级同样不影响 job 成功（成品已是未归一化的可用音频），
+            # 但需如实记录，避免"以为归一化了其实没有"（不静默吞错）。
+            if final.loudnorm_error is not None:
+                logger.warning("job %s loudness normalization skipped: %s", job_id, final.loudnorm_error)
+                db.add_event(
+                    conn,
+                    job_id=job_id,
+                    level="warning",
+                    message="loudness normalization skipped",
+                    data={"error": final.loudnorm_error},
                 )
         except Exception as exc:
             message = str(exc) or exc.__class__.__name__
