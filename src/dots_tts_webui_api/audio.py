@@ -17,6 +17,9 @@ class ChunkArtifact:
     text_path: Path
     tts_path: Path
     metrics: dict[str, Any]
+    # 真实送入模型的文本（normalize_text 开启时可能与 text 不同）。
+    # 句级对齐应基于它而非展示文本；为空时回退用 text。
+    tts_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,10 @@ class FinalArtifacts:
     timeline_path: Path
     sample_rate: int
     duration_seconds: float
+    # 句级对齐产物路径；未开启或对齐失败时为 None。
+    sentences_path: Path | None = None
+    # 对齐失败原因（供 worker 写 warning event）；成功或未开启时为 None。
+    alignment_error: str | None = None
 
 
 def write_chunk_text_artifacts(*, chunk_dir: Path, chunk_index: int, text: str, metrics: dict[str, Any]) -> tuple[Path, Path]:
@@ -51,7 +58,15 @@ def write_chunk_text_artifacts(*, chunk_dir: Path, chunk_index: int, text: str, 
     return text_path, tts_path
 
 
-def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], silence_ms: int) -> FinalArtifacts:
+def merge_artifacts(
+    *,
+    job_id: str,
+    job_dir: Path,
+    chunks: list[ChunkArtifact],
+    silence_ms: int,
+    enable_sentence_alignment: bool = False,
+    alignment_device: str = "cpu",
+) -> FinalArtifacts:
     if not chunks:
         raise ValueError("cannot merge an empty chunk list")
     ordered = sorted(chunks, key=lambda chunk: chunk.chunk_index)
@@ -73,10 +88,13 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
     # 按样本精确累加每段在成品音频中的起止位置（含 chunk 间静音），
     # 由样本数除以采样率换算为毫秒整数，保证与 final.wav 波形严格对齐。
     timeline_entries: list[dict[str, Any]] = []
+    # 记录每个 chunk 在 final.wav 中的起始样本偏移，供句级对齐叠加为绝对时间。
+    chunk_start_samples: list[int] = []
     cursor_samples = 0
     for index, array in enumerate(arrays):
         chunk = ordered[index]
         start_samples = cursor_samples
+        chunk_start_samples.append(start_samples)
         end_samples = start_samples + array.shape[0]
         start_ms = round(start_samples * 1000 / sample_rate)
         end_ms = round(end_samples * 1000 / sample_rate)
@@ -152,6 +170,26 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
     manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     timeline_path.write_text(json.dumps(timeline_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # 句级强制对齐：增强产物，必须在主产物（wav/tts/manifest/timeline）写完之后进行。
+    # 整段包在独立 try/except 中，任何失败都不影响已落盘的主产物，也不让 job 失败；
+    # 失败原因如实回传给 worker 记录 warning event，不静默吞错。
+    sentences_path: Path | None = None
+    alignment_error: str | None = None
+    if enable_sentence_alignment:
+        try:
+            sentences_path = _write_sentences(
+                job_id=job_id,
+                job_dir=job_dir,
+                ordered=ordered,
+                arrays=arrays,
+                chunk_start_samples=chunk_start_samples,
+                sample_rate=sample_rate,
+                total_samples=len(final_audio),
+                device=alignment_device,
+            )
+        except Exception as exc:  # noqa: BLE001 - 对齐失败需降级但保留原因
+            alignment_error = f"{exc.__class__.__name__}: {exc}"
+
     return FinalArtifacts(
         final_wav_path=final_wav_path,
         final_text_path=final_text_path,
@@ -160,4 +198,71 @@ def merge_artifacts(*, job_id: str, job_dir: Path, chunks: list[ChunkArtifact], 
         timeline_path=timeline_path,
         sample_rate=sample_rate,
         duration_seconds=len(final_audio) / sample_rate,
+        sentences_path=sentences_path,
+        alignment_error=alignment_error,
     )
+
+
+def _write_sentences(
+    *,
+    job_id: str,
+    job_dir: Path,
+    ordered: list[ChunkArtifact],
+    arrays: list[np.ndarray],
+    chunk_start_samples: list[int],
+    sample_rate: int,
+    total_samples: int,
+    device: str,
+) -> Path | None:
+    """对每个 chunk 做句级强制对齐，叠加 chunk 偏移得绝对毫秒，写 sentences.json。
+
+    句在 chunk 内的相对秒由 alignment.align_chunk_sentences 给出（估计值），
+    叠加该 chunk 在 final.wav 的起始偏移得到相对成品的绝对时间。
+    所有句子均无对齐结果时返回 None（不产出空文件）。
+    """
+    # 延迟到此处 import：alignment 内部再 lazy import torch/torchaudio/pypinyin，
+    # mock 环境缺这些依赖时由调用方 try/except 捕获并降级。
+    from .alignment import align_chunk_sentences
+
+    sentence_entries: list[dict[str, Any]] = []
+    sentence_index = 0
+    for chunk, array, start_samples in zip(ordered, arrays, chunk_start_samples):
+        # 对齐基于真实送模型文本（tts_text），展示仍用原文 text；tts_text 为空时回退
+        align_text = chunk.tts_text or chunk.text
+        offset_ms = round(start_samples * 1000 / sample_rate)
+        timings = align_chunk_sentences(array, sample_rate, align_text, device=device)
+        for timing in timings:
+            start_ms = offset_ms + round(timing.start_s * 1000)
+            end_ms = offset_ms + round(timing.end_s * 1000)
+            entry: dict[str, Any] = {
+                "sentence_index": sentence_index,
+                "chunk_index": chunk.chunk_index,
+                "text": timing.text,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": end_ms - start_ms,
+            }
+            if timing.confidence is not None:
+                entry["confidence"] = round(timing.confidence, 4)
+            sentence_entries.append(entry)
+            sentence_index += 1
+
+    if not sentence_entries:
+        return None
+
+    sentences_path = job_dir / "sentences.json"
+    sentences_payload = {
+        "format": "dots_tts_webui_api.sentences.v1",
+        "job_id": job_id,
+        "sample_rate": sample_rate,
+        "duration_ms": round(total_samples * 1000 / sample_rate),
+        "precision": "estimated",
+        "method": "torchaudio.MMS_FA+pypinyin",
+        "alignment_model": "MMS_FA",
+        "note": "句级时间为强制对齐估计值，非逐样本精确；精确 chunk 时间见 timeline.json",
+        "sentences": sentence_entries,
+    }
+    sentences_path.write_text(
+        json.dumps(sentences_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return sentences_path

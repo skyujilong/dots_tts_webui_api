@@ -181,6 +181,7 @@ class SynthesisWorker:
                             text_path=text_path,
                             tts_path=tts_path,
                             metrics=result.metrics,
+                            tts_text=result.tts_text,
                         )
                     )
                 except Exception as exc:
@@ -207,10 +208,21 @@ class SynthesisWorker:
                             text_path=Path(chunk["text_path"]),
                             tts_path=Path(chunk["tts_path"]),
                             metrics=chunk.get("metrics") or {},
+                            # db 未持久化 tts_text 列，重建时回退用展示文本。
+                            # normalize_text=False（默认）时二者一致，对齐无影响；
+                            # 开启 normalize_text 时句级对齐可能因文本差异略有偏移。
+                            tts_text=chunk["text"],
                         )
                     )
 
-            final = merge_artifacts(job_id=job_id, job_dir=job_dir, chunks=artifacts, silence_ms=params.silence_ms)
+            final = merge_artifacts(
+                job_id=job_id,
+                job_dir=job_dir,
+                chunks=artifacts,
+                silence_ms=params.silence_ms,
+                enable_sentence_alignment=self.settings.enable_sentence_alignment,
+                alignment_device=self.settings.alignment_device,
+            )
             db.mark_job_status(
                 conn,
                 job_id=job_id,
@@ -220,6 +232,16 @@ class SynthesisWorker:
                 final_tts_path=str(final.final_tts_path),
                 manifest_path=str(final.manifest_path),
             )
+            # 句级对齐失败不影响 job 成功，但需如实记录便于排查（不静默吞错）。
+            if final.alignment_error is not None:
+                logger.warning("job %s sentence alignment skipped: %s", job_id, final.alignment_error)
+                db.add_event(
+                    conn,
+                    job_id=job_id,
+                    level="warning",
+                    message="sentence alignment skipped",
+                    data={"error": final.alignment_error},
+                )
         except Exception as exc:
             message = str(exc) or exc.__class__.__name__
             db.add_event(conn, job_id=job_id, level="error", message="job failed", data={"traceback": traceback.format_exc(limit=5)})

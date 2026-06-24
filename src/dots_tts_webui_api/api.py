@@ -64,6 +64,18 @@ def _timeline_url(settings: Settings, job_id: str) -> str | None:
     return f"/api/jobs/{job_id}/artifacts/timeline.json"
 
 
+def _sentences_url(settings: Settings, job_id: str) -> str | None:
+    """推导 sentences.json 的下载地址。
+
+    与 timeline 同理不入库，以文件是否实际存在为准：句级对齐是可失败的增强项，
+    失败时文件不存在则返回 None，避免给出指向不存在文件的伪 URL 掩盖问题。
+    """
+    sentences_path = ensure_inside_root(settings.artifact_dir / job_id / "sentences.json", settings.artifact_dir)
+    if not sentences_path.is_file():
+        return None
+    return f"/api/jobs/{job_id}/artifacts/sentences.json"
+
+
 def _voice_response(preset) -> VoicePresetResponse:
     return VoicePresetResponse(
         name=preset.name,
@@ -120,6 +132,7 @@ def _job_response(request: Request, job_id: str) -> JobStatusResponse:
         final_text_url=_artifact_url(job_id, job["final_text_path"]),
         final_tts_url=_artifact_url(job_id, job["final_tts_path"]),
         final_timeline_url=_timeline_url(get_settings(request), job_id),
+        final_sentences_url=_sentences_url(get_settings(request), job_id),
         manifest_url=_artifact_url(job_id, job["manifest_path"]),
         chunks=chunks,
         events=events,
@@ -441,7 +454,7 @@ def remove_job(request: Request, job_id: str) -> dict[str, bool]:
 
 @router.get("/jobs/{job_id}/artifacts/{artifact_name}")
 def artifact(request: Request, job_id: str, artifact_name: str) -> FileResponse:
-    if artifact_name not in {"final.wav", "final.txt", "final.tts", "manifest.json", "timeline.json"}:
+    if artifact_name not in {"final.wav", "final.txt", "final.tts", "manifest.json", "timeline.json", "sentences.json"}:
         raise HTTPException(status_code=404, detail="artifact not found")
     settings = get_settings(request)
     job_dir = ensure_inside_root(settings.artifact_dir / job_id, settings.artifact_dir)

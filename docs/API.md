@@ -289,6 +289,7 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 | `final_text_url` | `string \| null` | 最终文本地址 |
 | `final_tts_url` | `string \| null` | 最终 `.tts` 文件地址 |
 | `final_timeline_url` | `string \| null` | 时间轴文件 `timeline.json` 地址（产物就绪且文件存在时非空） |
+| `final_sentences_url` | `string \| null` | 句级时间轴 `sentences.json` 地址（仅在开启句级对齐且对齐成功时非空） |
 | `manifest_url` | `string \| null` | 清单文件地址 |
 | `chunks` | `ChunkStatusResponse[]` | 各 chunk 状态明细 |
 | `events` | `JobEventResponse[]` | 事件日志 |
@@ -327,7 +328,7 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 
 下载任务产物文件，返回 `FileResponse`。
 
-**`artifact_name` 仅允许以下取值**：`final.wav`、`final.txt`、`final.tts`、`timeline.json`、`manifest.json`。
+**`artifact_name` 仅允许以下取值**：`final.wav`、`final.txt`、`final.tts`、`timeline.json`、`sentences.json`、`manifest.json`。
 
 **`timeline.json`（时间轴清单，`dots_tts_webui_api.timeline.v1`）**
 
@@ -354,6 +355,46 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
   "chunks": [
     { "chunk_index": 0, "text": "第一段", "start_ms": 0, "end_ms": 1000, "duration_ms": 1000 },
     { "chunk_index": 1, "text": "第二段", "start_ms": 1500, "end_ms": 2000, "duration_ms": 500 }
+  ]
+}
+```
+
+**`sentences.json`（句级时间轴，`dots_tts_webui_api.sentences.v1`）**
+
+> ⚠️ **与 `timeline.json` 的本质区别**：`timeline.json` 是逐样本精确的 **chunk 级**时间轴；
+> `sentences.json` 是**句级**时间轴，通过事后强制对齐（torchaudio MMS_FA + 拼音罗马化）估算得到，
+> 属于 **估计值**（`precision: "estimated"`），句边界通常有几十到一两百毫秒误差，适合做字幕/对轴参考。
+
+该产物**仅在开启句级对齐时生成**：
+
+- 由 `DOTS_ENABLE_SENTENCE_ALIGNMENT` 控制，**real 模式默认开启、mock 模式默认关闭**。
+- 对齐是增强项：若对齐失败（依赖缺失、模型下载失败等），主产物（`final.wav` / `timeline.json` 等）
+  不受影响、任务仍为 `succeeded`，但 `sentences.json` 不生成、`final_sentences_url` 为 `null`，
+  并在任务事件中记录一条 `warning`（`message="sentence alignment skipped"`）。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `format` | `string` | 固定为 `dots_tts_webui_api.sentences.v1` |
+| `job_id` | `string` | 任务 ID |
+| `sample_rate` | `int` | 采样率 |
+| `duration_ms` | `int` | 成品音频总时长（毫秒） |
+| `precision` | `string` | 固定为 `estimated`，表明为对齐估计值（区别于 timeline 的逐样本精确） |
+| `method` / `alignment_model` | `string` | 对齐方法与模型（`torchaudio.MMS_FA+pypinyin` / `MMS_FA`） |
+| `note` | `string` | 提示文字（估计值、精确时间见 timeline.json） |
+| `sentences` | `object[]` | 每句：`sentence_index`、`chunk_index`、`text`、`start_ms`、`end_ms`、`duration_ms`、`confidence`（可选） |
+
+```json
+{
+  "format": "dots_tts_webui_api.sentences.v1",
+  "job_id": "bf8e86aa…",
+  "sample_rate": 16000,
+  "duration_ms": 12345,
+  "precision": "estimated",
+  "method": "torchaudio.MMS_FA+pypinyin",
+  "alignment_model": "MMS_FA",
+  "note": "句级时间为强制对齐估计值，非逐样本精确；精确 chunk 时间见 timeline.json",
+  "sentences": [
+    { "sentence_index": 0, "chunk_index": 0, "text": "第一句。", "start_ms": 0, "end_ms": 980, "duration_ms": 980, "confidence": 0.83 }
   ]
 }
 ```

@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     precision: str = "bfloat16"
     optimize: bool = False
     max_generate_length: int = 500
+
+    # 句级强制对齐开关。None 表示"未显式设置"，由 model_validator 按模式推导：
+    # real 模式默认开启、mock 模式默认关闭（避免 mock 下无 torch 时反复降级记 warning）。
+    # 显式设置 DOTS_ENABLE_SENTENCE_ALIGNMENT 时以用户值为准。
+    enable_sentence_alignment: bool | None = None
+    # 对齐声学模型运行设备；真机有 GPU 可设 "cuda" 提速。
+    alignment_device: str = "cpu"
 
     chunk_min_chars: int = 180
     chunk_max_chars: int = 1200
@@ -65,6 +72,13 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("must be positive")
         return value
+
+    @model_validator(mode="after")
+    def _resolve_sentence_alignment_default(self) -> "Settings":
+        # 未显式设置时按模式推导：real 默认开、mock 默认关。
+        if self.enable_sentence_alignment is None:
+            object.__setattr__(self, "enable_sentence_alignment", not self.mock_tts)
+        return self
 
     def ensure_directories(self) -> None:
         for path in (self.data_dir, self.artifact_dir, self.voices_dir, self.log_file.parent):

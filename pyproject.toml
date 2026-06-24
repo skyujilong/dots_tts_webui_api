@@ -19,7 +19,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-real = []
+real = [
+    # 句级强制对齐用：把中文转无声调拼音以喂给 torchaudio MMS_FA 对齐模型。
+    # 纯 Python、轻量；torch/torchaudio 由 dots.tts + constraints.txt 安装，不在此声明。
+    "pypinyin>=0.51,<1",
+]
 test = [
     "httpx>=0.27,<1",
     "pytest>=8.2,<9",
