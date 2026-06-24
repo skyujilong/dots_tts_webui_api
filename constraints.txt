@@ -1,0 +1,28 @@
+# dots.tts 依赖约束文件
+#
+# 作用：约束 run.sh 中 `uv pip install -e <dots.tts>` 解析出的关键依赖版本。
+# dots.tts 的 pyproject.toml 多为 ">=" 下限、无上限，uv 默认会拉到最新大版本，
+# 跨大版本（如 transformers 5.x）会与 dots.tts 4.57 时代的代码不兼容，
+# 典型表现为 import 阶段触发 torch._dynamo 的
+# "Duplicate dispatch rule for intern" 冲突。
+#
+# 策略：只锁“大版本边界”，关闭破坏性的跨大版本升级；不钉死精确版本，
+# 以免与不同机器的 CUDA 轮子标签（如 +cu130）或次版本更新产生冲突。
+# 仅对 dots.tts 明确声明了版本下限的核心包设上限，其余无下限的包不在此干预。
+
+# 深度学习核心：torch 与 torchaudio 必须同处 2.x（且需匹配机器 CUDA 驱动）
+torch>=2.8,<3
+torchaudio>=2.8,<3
+
+# 触发本次故障的根因：限制在 4.57 这一代，禁止跨入不兼容的 5.x
+transformers>=4.57,<5
+
+# 模型权重/数值/音频处理相关，锁同大版本边界
+numpy>=2.2,<3
+safetensors>=0.8,<1
+librosa>=0.11,<1
+soundfile>=0.13,<1
+
+# 配置解析
+pydantic>=2.12.5,<3
+PyYAML>=6.0.3,<7

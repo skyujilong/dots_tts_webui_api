@@ -54,7 +54,14 @@ if [[ "$MOCK_TTS" != "1" && "$MOCK_TTS" != "true" && "$MOCK_TTS" != "True" ]]; t
     exit 1
   fi
   echo "Installing upstream dots.tts from: $DOTS_TTS_REPO_PATH"
-  uv pip install --python "$PYTHON" -e "$DOTS_TTS_REPO_PATH"
+  # 通过 constraints.txt 锁定关键依赖版本边界（如 transformers<5），
+  # 避免 dots.tts 的开放式下限被 uv 解析到不兼容的大版本。
+  CONSTRAINTS_FILE="$ROOT_DIR/constraints.txt"
+  if [[ -f "$CONSTRAINTS_FILE" ]]; then
+    uv pip install --python "$PYTHON" --constraint "$CONSTRAINTS_FILE" -e "$DOTS_TTS_REPO_PATH"
+  else
+    uv pip install --python "$PYTHON" -e "$DOTS_TTS_REPO_PATH"
+  fi
   if [[ -d "$DOTS_TTS_REPO_PATH/src" ]]; then
     export PYTHONPATH="$DOTS_TTS_REPO_PATH/src${PYTHONPATH:+:$PYTHONPATH}"
   else
