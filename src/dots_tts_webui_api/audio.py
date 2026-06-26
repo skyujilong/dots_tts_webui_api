@@ -285,7 +285,7 @@ def _write_sentences(
         "precision": "estimated",
         "method": "torchaudio.MMS_FA+pypinyin",
         "alignment_model": "MMS_FA",
-        "note": "句级时间为强制对齐估计值，非逐样本精确；精确 chunk 时间见 timeline.json",
+        "note": "段级（子句/句子）时间为强制对齐估计值，非逐样本精确；按句末与子句标点切分，精确 chunk 时间见 timeline.json",
         "sentences": sentence_entries,
     }
     sentences_path.write_text(

@@ -359,18 +359,14 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 }
 ```
 
-**`sentences.json`（句级时间轴，`dots_tts_webui_api.sentences.v1`）**
+**`sentences.json`（段级时间轴，`dots_tts_webui_api.sentences.v1`）**
 
 > ⚠️ **与 `timeline.json` 的本质区别**：`timeline.json` 是逐样本精确的 **chunk 级**时间轴；
-> `sentences.json` 是**句级**时间轴，通过事后强制对齐（torchaudio MMS_FA + 拼音罗马化）估算得到，
-> 属于 **估计值**（`precision: "estimated"`），句边界通常有几十到一两百毫秒误差，适合做字幕/对轴参考。
-
-该产物**仅在开启句级对齐时生成**：
-
-- 由 `DOTS_ENABLE_SENTENCE_ALIGNMENT` 控制，**real 模式默认开启、mock 模式默认关闭**。
-- 对齐是增强项：若对齐失败（依赖缺失、模型下载失败等），主产物（`final.wav` / `timeline.json` 等）
-  不受影响、任务仍为 `succeeded`，但 `sentences.json` 不生成、`final_sentences_url` 为 `null`，
-  并在任务事件中记录一条 `warning`（`message="sentence alignment skipped"`）。
+> `sentences.json` 是**段级**时间轴（子句/句子），通过事后强制对齐（torchaudio MMS_FA + 拼音罗马化）估算得到，
+> 属于 **估计值**（`precision: "estimated"`），段边界通常有几十到一两百毫秒误差，适合做字幕/对轴参考。
+>
+> 切分粒度：在句末标点（`。！？.!?`）基础上额外按子句标点（`，；、;,:`）切分，
+> 使长句被拆分为更短的子句段，每段有独立时间戳。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -381,7 +377,7 @@ curl -X POST http://127.0.0.1:8080/api/jobs/form \
 | `precision` | `string` | 固定为 `estimated`，表明为对齐估计值（区别于 timeline 的逐样本精确） |
 | `method` / `alignment_model` | `string` | 对齐方法与模型（`torchaudio.MMS_FA+pypinyin` / `MMS_FA`） |
 | `note` | `string` | 提示文字（估计值、精确时间见 timeline.json） |
-| `sentences` | `object[]` | 每句：`sentence_index`、`chunk_index`、`text`、`start_ms`、`end_ms`、`duration_ms`、`confidence`（可选） |
+| `sentences` | `object[]` | 每段（子句/句子）：`sentence_index`、`chunk_index`、`text`、`start_ms`、`end_ms`、`duration_ms`、`confidence`（可选） |
 
 ```json
 {

@@ -29,6 +29,21 @@ def test_split_sentences_skips_blank():
     assert [s.text for s in spans] == ["好的。"]
 
 
+def test_split_sentences_clause_level():
+    # 子句标点（逗号/分号/顿号）也作为切分点，长句拆分为更短的段
+    spans = split_sentences("今天天气很好，我们去公园。")
+    assert [(s.char_start, s.char_end, s.text) for s in spans] == [
+        (0, 7, "今天天气很好，"),
+        (7, 13, "我们去公园。"),
+    ]
+
+
+def test_split_sentences_mixed_clause_punctuation():
+    # 多种子句标点混合
+    spans = split_sentences("第一点，第二点；第三点。")
+    assert [s.text for s in spans] == ["第一点，", "第二点；", "第三点。"]
+
+
 def test_aggregate_takes_first_last_token_per_sentence():
     spans = split_sentences("第一句。第二句。")  # [0,4) 与 [4,8)
     tokens = [

@@ -4,18 +4,18 @@ import re
 from dataclasses import dataclass
 
 
-# 句子边界字符：与 chunking.SPLIT_PATTERN 保持一致（中英文句末标点 + 换行）。
-# 这里独立定义而非复用，是因为切句策略不同：chunking 用它做"切分点"，
-# 本模块要保留标点并记录每句在原文中的字符区间。
-SENTENCE_BOUNDARY = "。！？.!?\n"
+# 段落边界字符：在句末标点基础上增加子句标点（逗号/分号/冒号/顿号），
+# 使长句被进一步拆分为更短的子句段，每段有独立时间戳，更适合字幕/对轴。
+# 标点归属到它前面的段落。
+SENTENCE_BOUNDARY = "。！？.!?\n，；、;,:"
 
 
 @dataclass(frozen=True)
 class SentenceSpan:
-    """一句话在 chunk 文本中的位置。
+    """一个段落（子句或句子）在 chunk 文本中的位置。
 
-    char_start/char_end 是该句在 chunk 文本中的字符区间 [start, end)，
-    标点归属到它前面的句子。
+    char_start/char_end 是该段在 chunk 文本中的字符区间 [start, end)，
+    标点归属到它前面的段落。
     """
 
     text: str
@@ -40,9 +40,9 @@ class TokenTiming:
 
 @dataclass(frozen=True)
 class SentenceTiming:
-    """一句话的对齐时间（chunk 内相对秒，估计值）。
+    """一个段落（子句或句子）的对齐时间（chunk 内相对秒，估计值）。
 
-    confidence 为该句覆盖 token 的置信度均值，拿不到时为 None。
+    confidence 为该段覆盖 token 的置信度均值，拿不到时为 None。
     """
 
     text: str
@@ -54,15 +54,16 @@ class SentenceTiming:
 
 
 def split_sentences(text: str) -> list[SentenceSpan]:
-    """按句末标点/换行把文本切成句子，并记录每句的字符区间。
+    """按句末/子句标点与换行把文本切成段落，并记录每段的字符区间。
 
-    标点归属到前一句；去掉边界标点与空白后无实质内容的片段（如纯标点 "。"、
-    空白行）被跳过。返回的区间相对于传入的 text，供后续把 token 时间聚合回
-    句子边界使用。
+    在句末标点（。！？.!?）基础上额外按子句标点（，；、;,:）切分，
+    使长句拆分为更短的子句段。标点归属到前一段；去掉边界标点与空白后
+    无实质内容的片段（如纯标点 "."、空白行）被跳过。返回的区间相对于
+    传入的 text，供后续把 token 时间聚合回段落边界使用。
     """
 
     def has_content(piece: str) -> bool:
-        # 去掉句末标点与空白后仍有字符，才算一个真正的句子
+        # 去掉边界标点与空白后仍有字符，才算一个真正的段落
         return bool(piece.strip(SENTENCE_BOUNDARY).strip())
 
     spans: list[SentenceSpan] = []
@@ -86,11 +87,11 @@ def aggregate_token_timings(
     sentences: list[SentenceSpan],
     tokens: list[TokenTiming],
 ) -> list[SentenceTiming]:
-    """把 token 级对齐时间聚合到句级（纯逻辑，便于单测）。
+    """把 token 级对齐时间聚合到段级（纯逻辑，便于单测）。
 
-    对每句取落在其字符区间内的 token：起始时间用首 token 的 start_s，
-    结束时间用尾 token 的 end_s。句内无任何 token（如纯标点/数字被丢弃）
-    时跳过该句——不臆造时间，避免用伪数据掩盖对齐缺口。
+    对每段取落在其字符区间内的 token：起始时间用首 token 的 start_s，
+    结束时间用尾 token 的 end_s。段内无任何 token（如纯标点/数字被丢弃）
+    时跳过该段——不臆造时间，避免用伪数据掩盖对齐缺口。
     """
     results: list[SentenceTiming] = []
     for span in sentences:
