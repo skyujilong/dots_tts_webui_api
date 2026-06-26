@@ -232,7 +232,9 @@ function renderJob(job) {
       ['final.txt', job.final_text_url],
       ['final.tts', job.final_tts_url],
       ['manifest.json', job.manifest_url],
-    ];
+      ['timeline.json', job.final_timeline_url],
+      ['sentences.json', job.final_sentences_url],
+    ].filter(([, href]) => href);
     $('downloadLinks').replaceChildren(...links.map(([label, href]) => {
       const a = document.createElement('a');
       a.href = href;
