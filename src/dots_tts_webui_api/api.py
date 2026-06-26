@@ -444,8 +444,8 @@ def remove_job(request: Request, job_id: str) -> dict[str, bool]:
     job = db.get_job(conn, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if job["status"] in {"running", "cancel_requested"}:
-        raise HTTPException(status_code=409, detail="cannot delete a running job; cancel it first")
+    if job["status"] in {"queued", "running", "cancel_requested"}:
+        db.request_cancel(conn, job_id)
     job_dir = ensure_inside_root(settings.artifact_dir / job_id, settings.artifact_dir)
     deleted = db.delete_job(conn, job_id)
     shutil.rmtree(job_dir, ignore_errors=True)

@@ -284,8 +284,12 @@ function stopHistoryPolling() {
 
 async function cancelCurrentJob() {
   if (!state.currentJobId) return;
-  await api(`/api/jobs/${state.currentJobId}/cancel`, { method: 'POST' });
-  await pollJob();
+  try {
+    await api(`/api/jobs/${state.currentJobId}/cancel`, { method: 'POST' });
+    await pollJob();
+  } catch (error) {
+    $('errorMessage').textContent = error.message;
+  }
 }
 
 async function loadHistory() {
@@ -340,9 +344,38 @@ async function loadHistory() {
   }
 }
 
+function showConfirmDialog(message) {
+  return new Promise((resolve) => {
+    const modal = $('confirmModal');
+    $('confirmMessage').textContent = message;
+    modal.classList.remove('hidden');
+    const onOk = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+    const onOverlay = (e) => { if (e.target === modal) { cleanup(); resolve(false); } };
+    const onKey = (e) => { if (e.key === 'Escape') { cleanup(); resolve(false); } };
+    function cleanup() {
+      modal.classList.add('hidden');
+      $('confirmOk').removeEventListener('click', onOk);
+      $('confirmCancel').removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onOverlay);
+      document.removeEventListener('keydown', onKey);
+    }
+    $('confirmOk').addEventListener('click', onOk);
+    $('confirmCancel').addEventListener('click', onCancel);
+    modal.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 async function deleteJob(jobId) {
-  if (!confirm('确定删除这个任务及其产出物吗？')) return;
-  await api(`/api/jobs/${jobId}`, { method: 'DELETE' });
+  const confirmed = await showConfirmDialog('确定删除这个任务及其产出物吗？');
+  if (!confirmed) return;
+  try {
+    await api(`/api/jobs/${jobId}`, { method: 'DELETE' });
+  } catch (error) {
+    $('errorMessage').textContent = error.message;
+    return;
+  }
   if (state.currentJobId === jobId) {
     state.currentJobId = null;
     stopPolling();
@@ -360,8 +393,12 @@ async function deleteJob(jobId) {
 async function deleteSelectedVoice() {
   const name = $('voiceSelect').value;
   if (!name || name === '__custom__') return;
-  await api(`/api/voices/${name}`, { method: 'DELETE' });
-  await loadVoices();
+  try {
+    await api(`/api/voices/${name}`, { method: 'DELETE' });
+    await loadVoices();
+  } catch (error) {
+    $('errorMessage').textContent = error.message;
+  }
 }
 
 async function init() {
